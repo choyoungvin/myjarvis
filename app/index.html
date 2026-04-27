@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S — Academic Command Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+    <!-- Scan-line overlay -->
+    <div class="scanlines"></div>
+
+    <!-- Top HUD Bar -->
+    <header class="hud-bar top-bar">
+        <div class="hud-section left">
+            <span class="hud-label">SYS.VER</span>
+            <span class="hud-value" id="sysVer">J.A.R.V.I.S v4.2.1</span>
+        </div>
+        <div class="hud-section center">
+            <div class="title-block">
+                <div class="title-dots"><span></span><span></span><span></span></div>
+                <h1>J.A.R.V.I.S</h1>
+                <p class="subtitle">JUST A RATHER VERY INTELLIGENT SYSTEM</p>
+            </div>
+        </div>
+        <div class="hud-section right">
+            <span class="hud-label">STATUS</span>
+            <span class="hud-value blink" id="systemStatus">ONLINE</span>
+        </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="main-grid">
+
+        <!-- Left Panel: Stats -->
+        <aside class="panel left-panel">
+            <div class="panel-header">SYSTEM DIAGNOSTICS</div>
+            <div class="stat-block">
+                <div class="stat-row">
+                    <span class="stat-label">CPU</span>
+                    <div class="stat-bar-wrap"><div class="stat-bar" id="cpuBar" style="width:42%"></div></div>
+                    <span class="stat-val" id="cpuVal">42%</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">MEM</span>
+                    <div class="stat-bar-wrap"><div class="stat-bar" id="memBar" style="width:68%"></div></div>
+                    <span class="stat-val" id="memVal">68%</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">NET</span>
+                    <div class="stat-bar-wrap"><div class="stat-bar" id="netBar" style="width:25%"></div></div>
+                    <span class="stat-val" id="netVal">25%</span>
+                </div>
+            </div>
+
+            <div class="panel-header" style="margin-top:20px;">VOICE COMMANDS</div>
+            <ul class="command-list">
+                <li><span class="cmd-key">"자비스, 안녕"</span> 인사</li>
+                <li><span class="cmd-key">"프로세스 보여줘"</span> 실행 앱 목록</li>
+                <li><span class="cmd-key">"시간 알려줘"</span> 현재 시각</li>
+                <li><span class="cmd-key">"날씨 어때"</span> 날씨 정보</li>
+                <li><span class="cmd-key">"파일 정리해줘"</span> 확장자 안내</li>
+                <li><span class="cmd-key">"도움말"</span> 전체 명령 목록</li>
+            </ul>
+
+            <div class="panel-header" style="margin-top:20px;">CLOCK</div>
+            <div class="clock-display" id="clockDisplay">--:--:--</div>
+        </aside>
+
+        <!-- Center: Hologram + Waveform -->
+        <section class="center-section">
+            <!-- Arc Reactor Hologram -->
+            <div class="hologram-wrapper">
+                <canvas id="waveCanvas"></canvas>
+                <div class="arc-reactor">
+                    <div class="arc-ring arc-r1"></div>
+                    <div class="arc-ring arc-r2"></div>
+                    <div class="arc-ring arc-r3"></div>
+                    <div class="arc-ring arc-r4"></div>
+                    <div class="arc-core" id="arcCore">
+                        <div class="arc-core-inner"></div>
+                    </div>
+                </div>
+                <div class="hud-cross hud-cross-tl"></div>
+                <div class="hud-cross hud-cross-tr"></div>
+                <div class="hud-cross hud-cross-bl"></div>
+                <div class="hud-cross hud-cross-br"></div>
+            </div>
+
+            <!-- Mic Status -->
+            <div class="mic-status-wrap">
+                <div class="mic-dot" id="micDot"></div>
+                <span id="micStatusText">VOICE LINK OFFLINE</span>
+            </div>
+
+            <!-- Voice Button -->
+            <button class="voice-btn" id="voiceBtn">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                <span id="voiceBtnLabel">ACTIVATE VOICE LINK</span>
+            </button>
+
+            <!-- Transcript Display -->
+            <div class="transcript-box" id="transcriptBox">
+                <span class="transcript-placeholder">음성 입력 대기 중...</span>
+            </div>
+        </section>
+
+        <!-- Right Panel: Console Output -->
+        <aside class="panel right-panel">
+            <div class="panel-header">JARVIS CONSOLE</div>
+            <div class="console-output" id="consoleOutput"></div>
+        </aside>
+    </main>
+
+    <!-- Bottom HUD Bar -->
+    <footer class="hud-bar bottom-bar">
+        <span class="hud-label">VOICE ENGINE: <span id="voiceEngine">Web Speech API</span></span>
+        <span class="hud-label">AUDIO: <span id="audioStatus">STANDBY</span></span>
+        <span class="hud-label">RECOGNITION: <span id="recognitionStatus">IDLE</span></span>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
