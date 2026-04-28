@@ -3,21 +3,48 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>J.A.R.V.I.S — Academic Command Center</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <title>J.A.R.V.I.S — Academic Secretary</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-
-    <!-- Scan-line overlay -->
     <div class="scanlines"></div>
 
-    <!-- Top HUD Bar -->
+    <!-- Custom Titlebar (Electron frameless) -->
+    <div class="titlebar">
+        <div class="titlebar-drag"></div>
+        <div class="titlebar-controls">
+            <button class="tb-btn tb-settings" id="settingsBtn" title="설정">⚙</button>
+            <button class="tb-btn tb-min" onclick="window.jarvis?.minimize()" title="최소화">−</button>
+            <button class="tb-btn tb-close" onclick="window.jarvis?.close()" title="닫기">×</button>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span>⚙ JARVIS SETTINGS</span>
+                <button class="modal-close" id="modalClose">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-section">NOTION INTEGRATION</p>
+                <label class="modal-label">Integration Token</label>
+                <input type="password" id="notionToken" class="modal-input" placeholder="secret_xxxxxxxx...">
+                <label class="modal-label">Database ID</label>
+                <input type="text" id="notionDbId" class="modal-input" placeholder="32자리 데이터베이스 ID">
+                <p class="modal-hint">노션 통합: notion.so → 설정 → 연결 → 새 통합 만들기 후 Database에 연결</p>
+                <button class="modal-save" id="modalSave">저장</button>
+                <p class="modal-section" style="margin-top:16px">macOS PERMISSIONS</p>
+                <p class="modal-hint">캘린더/미리알림: 시스템 설정 → 개인 정보 보호 → 캘린더 / 미리알림 → J.A.R.V.I.S 허용</p>
+            </div>
+        </div>
+    </div>
+
     <header class="hud-bar top-bar">
         <div class="hud-section left">
-            <span class="hud-label">SYS.VER</span>
-            <span class="hud-value" id="sysVer">J.A.R.V.I.S v4.2.1</span>
+            <span class="hud-label">SYSTEM</span>
+            <span class="hud-value">J.A.R.V.I.S v2.0 — Academic Secretary</span>
         </div>
         <div class="hud-section center">
             <div class="title-block">
@@ -27,52 +54,28 @@
             </div>
         </div>
         <div class="hud-section right">
-            <span class="hud-label">STATUS</span>
-            <span class="hud-value blink" id="systemStatus">ONLINE</span>
+            <span class="hud-label">DATE</span>
+            <span class="hud-value" id="headerDate">--</span>
         </div>
     </header>
 
-    <!-- Main Grid -->
     <main class="main-grid">
 
-        <!-- Left Panel: Stats -->
+        <!-- LEFT: Schedule + Todo -->
         <aside class="panel left-panel">
-            <div class="panel-header">SYSTEM DIAGNOSTICS</div>
-            <div class="stat-block">
-                <div class="stat-row">
-                    <span class="stat-label">CPU</span>
-                    <div class="stat-bar-wrap"><div class="stat-bar" id="cpuBar" style="width:42%"></div></div>
-                    <span class="stat-val" id="cpuVal">42%</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">MEM</span>
-                    <div class="stat-bar-wrap"><div class="stat-bar" id="memBar" style="width:68%"></div></div>
-                    <span class="stat-val" id="memVal">68%</span>
-                </div>
-                <div class="stat-row">
-                    <span class="stat-label">NET</span>
-                    <div class="stat-bar-wrap"><div class="stat-bar" id="netBar" style="width:25%"></div></div>
-                    <span class="stat-val" id="netVal">25%</span>
-                </div>
+            <div class="panel-header">TODAY'S SCHEDULE <span id="todayLabel" class="panel-sub"></span></div>
+            <div class="schedule-list" id="scheduleList"><div class="empty-msg">로딩 중...</div></div>
+
+            <div class="panel-header" style="margin-top:14px">TO-DO LIST</div>
+            <div class="todo-list" id="todoList"></div>
+            <div class="todo-input-wrap">
+                <input type="text" id="todoInput" class="todo-input" placeholder="할 일 추가...">
+                <button id="todoAddBtn" class="todo-add-btn">+</button>
             </div>
-
-            <div class="panel-header" style="margin-top:20px;">VOICE COMMANDS</div>
-            <ul class="command-list">
-                <li><span class="cmd-key">"자비스, 안녕"</span> 인사</li>
-                <li><span class="cmd-key">"프로세스 보여줘"</span> 실행 앱 목록</li>
-                <li><span class="cmd-key">"시간 알려줘"</span> 현재 시각</li>
-                <li><span class="cmd-key">"날씨 어때"</span> 날씨 정보</li>
-                <li><span class="cmd-key">"파일 정리해줘"</span> 확장자 안내</li>
-                <li><span class="cmd-key">"도움말"</span> 전체 명령 목록</li>
-            </ul>
-
-            <div class="panel-header" style="margin-top:20px;">CLOCK</div>
-            <div class="clock-display" id="clockDisplay">--:--:--</div>
         </aside>
 
-        <!-- Center: Hologram + Waveform -->
+        <!-- CENTER: Hologram -->
         <section class="center-section">
-            <!-- Arc Reactor Hologram -->
             <div class="hologram-wrapper">
                 <canvas id="waveCanvas"></canvas>
                 <div class="arc-reactor">
@@ -90,15 +93,13 @@
                 <div class="hud-cross hud-cross-br"></div>
             </div>
 
-            <!-- Mic Status -->
             <div class="mic-status-wrap">
                 <div class="mic-dot" id="micDot"></div>
                 <span id="micStatusText">VOICE LINK OFFLINE</span>
             </div>
 
-            <!-- Voice Button -->
             <button class="voice-btn" id="voiceBtn">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                     <line x1="12" y1="19" x2="12" y2="23"/>
@@ -107,24 +108,27 @@
                 <span id="voiceBtnLabel">ACTIVATE VOICE LINK</span>
             </button>
 
-            <!-- Transcript Display -->
             <div class="transcript-box" id="transcriptBox">
-                <span class="transcript-placeholder">음성 입력 대기 중...</span>
+                <span class="transcript-placeholder">"안녕 자비스" 라고 말해보세요</span>
             </div>
         </section>
 
-        <!-- Right Panel: Console Output -->
+        <!-- RIGHT: Assignments + Console -->
         <aside class="panel right-panel">
-            <div class="panel-header">JARVIS CONSOLE</div>
+            <div class="panel-header">MISSION CRITICAL — 과제 현황</div>
+            <div class="assignment-list" id="assignmentList"></div>
+
+            <div class="panel-header" style="margin-top:12px">JARVIS CONSOLE</div>
             <div class="console-output" id="consoleOutput"></div>
         </aside>
+
     </main>
 
-    <!-- Bottom HUD Bar -->
     <footer class="hud-bar bottom-bar">
-        <span class="hud-label">VOICE ENGINE: <span id="voiceEngine">Web Speech API</span></span>
-        <span class="hud-label">AUDIO: <span id="audioStatus">STANDBY</span></span>
-        <span class="hud-label">RECOGNITION: <span id="recognitionStatus">IDLE</span></span>
+        <span><span class="hud-label">VOICE: </span><span id="audioStatus">STANDBY</span></span>
+        <span><span class="hud-label">RECOG: </span><span id="recognitionStatus">IDLE</span></span>
+        <span><span class="hud-label">WEATHER: </span><span id="weatherStatus">―</span></span>
+        <span><span class="hud-label">TASKS: </span><span id="taskCount">0 pending</span></span>
     </footer>
 
     <script src="js/app.js"></script>

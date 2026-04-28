@@ -1,0 +1,40 @@
+{
+  "name": "jarvis-ai",
+  "version": "2.0.0",
+  "description": "J.A.R.V.I.S Academic Secretary — AI-powered student assistant",
+  "main": "main.js",
+  "author": "202644009 조영빈",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^36.2.1",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "build": {
+    "appId": "com.joker.jarvis-ai",
+    "productName": "J.A.R.V.I.S",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "app/assets/icon.icns",
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "hardenedRuntime": true
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "!node_modules"
+    ]
+  }
+}
