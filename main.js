@@ -23,6 +23,9 @@ function saveConfig(data) {
 
 function createWindow() {
     app.setName('JARVIS');
+    if (process.platform === 'darwin') {
+        app.dock.setIcon(path.join(__dirname, 'app/assets/icon.png'));
+    }
     const win = new BrowserWindow({
         width: 1280,
         height: 800,
