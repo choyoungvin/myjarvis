@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('jarvis', {
     // Config
     getConfig: () => ipcRenderer.invoke('get-config'),
     saveConfig: (data) => ipcRenderer.invoke('save-config', data),
+    transcribeAudio: (buffer) => ipcRenderer.invoke('transcribe-audio', buffer),
+    askLlm: (payload) => ipcRenderer.invoke('ask-llm', payload),
 
     // Window controls
     minimize: () => ipcRenderer.send('window-minimize'),

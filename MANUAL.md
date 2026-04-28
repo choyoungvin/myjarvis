@@ -2,7 +2,7 @@
 
 > **과목:** 인공지능 기초  
 > **제출자:** 202644009 조영빈  
-> **제출일:** 2026년 5월  
+> **제출일:** 2026년 4월 29일 
 > **AI 협업 도구:** Antigravity AI Agent
 
 ---
@@ -68,11 +68,19 @@
 
 ## 4. 실행 방법
 
-1. `jarvis-ai/app/` 폴더 안의 `index.html` 파일을 **Google Chrome** 브라우저로 엽니다.
-   > ⚠ Safari나 Firefox는 Web Speech API 미지원으로 음성 기능이 작동하지 않습니다.
-2. 화면 중앙의 **[ACTIVATE VOICE LINK]** 버튼을 클릭합니다.
-3. 브라우저의 마이크 권한 허용 팝업에서 **허용**을 클릭합니다.
-4. "**안녕 자비스**"라고 말하면 오늘의 브리핑이 시작됩니다.
+본 프로그램은 두 가지 방식으로 실행할 수 있습니다:
+
+### 방법 A: Google Chrome 브라우저 실행 (권장 ⭐)
+**음성 인식 기능이 가장 안정적으로 작동하는 방식입니다.**
+1. `jarvis-ai/app/index.html` 파일을 마우스 오른쪽 버튼으로 클릭합니다.
+2. **[다음으로 열기] > [Google Chrome]**을 선택합니다.
+3. 중앙의 **[ACTIVATE VOICE LINK]** 버튼을 클릭하고 마이크 권한을 허용합니다.
+
+### 방법 B: Electron 데스크탑 앱 실행
+**macOS 캘린더 및 노션 연동 기능을 사용할 때 필요합니다.**
+1. 터미널(Terminal) 앱을 엽니다.
+2. 프로젝트 폴더로 이동 후 `npm start` 명령어를 입력합니다.
+   > ⚠ **주의**: Electron 환경에서는 Google의 보안 정책상 음성 인식(`network` error)이 불안정할 수 있습니다. 이 경우 방법 A를 사용하세요.
 
 ---
 
@@ -103,14 +111,26 @@ AI Agent와 함께 결정한 핵심 기술 선택:
 
 | 항목 | 내용 |
 |---|---|
-| 실행 환경 | Google Chrome (최신 버전) |
+| 권장 브라우저 | Google Chrome (음성 인식 최적화) |
+| 데스크탑 환경 | Electron (macOS 시스템 통합용) |
 | 개발 언어 | HTML5, CSS3, JavaScript (ES6+) |
-| 외부 API | wttr.in (날씨, CORS 지원, 무료) |
-| 데이터 저장 | Browser localStorage |
+| 외부 API | wttr.in (날씨), Notion API |
+| 데이터 저장 | Browser localStorage, JSON Config |
 | 음성 인식 | Web Speech API (ko-KR) |
 | 오디오 분석 | Web Audio API (AnalyserNode) |
 | 시각화 | HTML5 Canvas 2D |
 | 폰트 | Orbitron, Share Tech Mono (Google Fonts) |
+
+---
+
+## 7. 문제 해결 (FAQ)
+
+**Q: "Recognition error: network" 오류가 발생합니다.**
+A: 이 오류는 주로 **Electron 앱**에서 실행할 때 발생합니다. Google 음성 인식 서비스는 보안상 공식 브라우저(Chrome)가 아닌 환경에서의 접근을 제한할 수 있습니다. 
+*   **해결책**: `app/index.html` 파일을 **Chrome 브라우저**에서 직접 열어 실행해 주세요. 브라우저 모드에서도 날씨, 일정, 과제 계산 기능은 모두 정상 작동합니다.
+
+**Q: 마이크 파형이 움직이지 않아요.**
+A: 마이크 권한이 거부되었거나, 시스템 설정에서 마이크 입력 장치가 올바르게 선택되지 않았을 수 있습니다. 브라우저 주소창 왼쪽의 자물쇠 아이콘을 눌러 권한을 확인해 주세요.
 
 ---
 

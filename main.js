@@ -10,14 +10,17 @@ function loadConfig() {
     try {
         if (fs.existsSync(CONFIG_PATH)) return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
     } catch {}
-    return { notionToken: '', notionDbId: '' };
+    return { 
+        notionToken: '', 
+        notionDbId: '',
+        groqApiKey: '' 
+    };
 }
 
 function saveConfig(data) {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2));
 }
 
-// ── Create Window ────────────────────────────────────────────
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
@@ -31,8 +34,13 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            spellcheck: true,
         },
     });
+
+    // Spoof User-Agent to look like official Chrome to avoid 'network' error in Web Speech API
+    const chromeUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    win.webContents.setUserAgent(chromeUA);
 
     win.loadFile('app/index.html');
 
@@ -55,67 +63,60 @@ function runAppleScript(script) {
     });
 }
 
-// ── IPC: macOS Calendar ──────────────────────────────────────
+// ── IPC: macOS Integration (via Swift EventKit) ────────────────
 ipcMain.handle('get-calendar-events', async () => {
-    const script = `
-        set output to {}
-        set todayStart to current date
-        set time of todayStart to 0
-        set todayEnd to todayStart + (1 * days)
-        tell application "Calendar"
-            repeat with aCal in every calendar
-                set calEvents to every event of aCal whose start date >= todayStart and start date < todayEnd
-                repeat with e in calEvents
-                    set evtTitle to summary of e
-                    set evtStart to start date of e
-                    set evtEnd to end date of e
-                    set end of output to (evtTitle & "|" & evtStart & "|" & evtEnd)
-                end repeat
-            end repeat
-        end tell
-        return output
-    `;
-    try {
-        const raw = await runAppleScript(script);
-        if (!raw || raw === '{}') return [];
-        return raw.split(', ').map(item => {
-            const parts = item.split('|');
-            return { title: parts[0] || '', start: parts[1] || '', end: parts[2] || '' };
+    return new Promise((resolve) => {
+        exec(`swift "${path.join(__dirname, 'mac-data.swift')}" calendar`, (err, stdout) => {
+            if (err || !stdout.trim()) resolve([]);
+            else {
+                try { resolve(JSON.parse(stdout.trim())); }
+                catch { resolve([]); }
+            }
         });
-    } catch (e) {
-        console.error('Calendar error:', e.message);
-        return { error: '캘린더 접근 실패. 시스템 환경설정 > 개인 정보 보호 > 캘린더에서 앱을 허용해주세요.' };
-    }
+    });
 });
 
-// ── IPC: macOS Reminders ─────────────────────────────────────
 ipcMain.handle('get-reminders', async () => {
-    const script = `
-        set output to {}
-        tell application "Reminders"
-            set incompleteItems to every reminder whose completed is false
-            repeat with r in incompleteItems
-                set rName to name of r
-                try
-                    set rDue to due date of r
-                    set end of output to (rName & "|" & rDue)
-                on error
-                    set end of output to (rName & "|none")
-                end try
-            end repeat
-        end tell
-        return output
-    `;
-    try {
-        const raw = await runAppleScript(script);
-        if (!raw || raw === '{}') return [];
-        return raw.split(', ').map(item => {
-            const parts = item.split('|');
-            return { name: parts[0] || '', due: parts[1] !== 'none' ? parts[1] : null };
+    return new Promise((resolve) => {
+        exec(`swift "${path.join(__dirname, 'mac-data.swift')}" reminders`, (err, stdout) => {
+            if (err || !stdout.trim()) resolve([]);
+            else {
+                try { resolve(JSON.parse(stdout.trim())); }
+                catch { resolve([]); }
+            }
         });
+    });
+});
+
+// ── IPC: Groq LLM (Brain) ────────────────────────────────────
+ipcMain.handle('ask-llm', async (_, { text, context }) => {
+    const config = loadConfig();
+    if (!config.groqApiKey) return { error: 'GROQ_API_KEY_MISSING' };
+
+    try {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 
+                'Authorization': `Bearer ${config.groqApiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model: 'llama3-70b-8192',
+                messages: [
+                    { role: 'system', content: `당신은 J.A.R.V.I.S, 조영빈 님의 학업을 돕는 인공지능 비서입니다. 아이언맨의 자비스처럼 정중하고 유능한 톤으로 짧게 대답하세요. 다음은 현재 사용자의 상태 데이터입니다:\n${context}` },
+                    { role: 'user', content: text }
+                ],
+                temperature: 0.5,
+                max_tokens: 150
+            }),
+        });
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        return { reply: data.choices[0].message.content };
     } catch (e) {
-        console.error('Reminders error:', e.message);
-        return { error: '미리알림 접근 실패. 시스템 환경설정 > 개인 정보 보호 > 미리알림에서 앱을 허용해주세요.' };
+        console.error('Groq LLM Error:', e);
+        return { error: e.message };
     }
 });
 
@@ -151,6 +152,35 @@ ipcMain.handle('get-notion-tasks', async () => {
         });
     } catch (e) {
         return { error: `Notion 연결 실패: ${e.message}` };
+    }
+});
+
+// ── IPC: Groq Whisper (Speech-to-Text) ────────────────────────
+ipcMain.handle('transcribe-audio', async (_, audioBuffer) => {
+    const config = loadConfig();
+    if (!config.groqApiKey) return { error: 'GROQ_API_KEY_MISSING' };
+
+    try {
+        // Create form data for Groq API
+        const formData = new FormData();
+        const blob = new Blob([audioBuffer], { type: 'audio/webm' });
+        formData.append('file', blob, 'audio.webm');
+        formData.append('model', 'whisper-large-v3');
+        formData.append('language', 'ko');
+        formData.append('response_format', 'json');
+
+        const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${config.groqApiKey}` },
+            body: formData,
+        });
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error.message);
+        return { text: data.text };
+    } catch (e) {
+        console.error('Groq Transcription Error:', e);
+        return { error: e.message };
     }
 });
 

@@ -1,18 +1,9 @@
 // J.A.R.V.I.S Academic Secretary — app.js
 
 // ── DATA ────────────────────────────────────────────────────
-const SCHEDULE = [
-    { subject:'인공지능 기초', start:'09:00', end:'10:30', loc:'공학관 201호', days:[1,4] },
-    { subject:'운영체제',       start:'13:00', end:'14:30', loc:'공학관 305호', days:[2,5] },
-    { subject:'데이터베이스',   start:'10:30', end:'12:00', loc:'정보관 102호', days:[3]   },
-    { subject:'컴퓨터 네트워크', start:'15:00', end:'16:30', loc:'공학관 401호', days:[2]  },
-];
-
-const ASSIGNMENTS = [
-    { subject:'인공지능 기초', title:'자비스 프로그램 제작 과제',   dueDate:'2026-05-10' },
-    { subject:'운영체제',      title:'스케줄링 알고리즘 분석 리포트', dueDate:'2026-05-15' },
-    { subject:'데이터베이스',  title:'ERD 설계 및 SQL 구현',         dueDate:'2026-05-20' },
-];
+let SCHEDULE = [];
+let ASSIGNMENTS = [];
+let REMINDERS = [];
 
 // ── DOM ──────────────────────────────────────────────────────
 const voiceBtn          = document.getElementById('voiceBtn');
@@ -38,7 +29,8 @@ const todayLabelEl      = document.getElementById('todayLabel');
 
 // ── STATE ────────────────────────────────────────────────────
 let audioCtx, analyser, micSource, animFrameId;
-let recognition, isListening = false;
+let mediaRecorder, audioChunks = [], isListening = false;
+let silenceTimer = null, lastAudioTime = Date.now(), hasSpoken = false;
 let weatherCache = null;
 
 // ── UTILS ────────────────────────────────────────────────────
@@ -74,30 +66,32 @@ updateClock();
 
 // ── SCHEDULE RENDER ──────────────────────────────────────────
 function renderSchedule() {
-    const dow   = new Date().getDay();
     const now   = new Date();
     const nowM  = now.getHours()*60 + now.getMinutes();
-    const items = SCHEDULE.filter(s => s.days.includes(dow))
-                          .sort((a,b) => timeToMins(a.start) - timeToMins(b.start));
 
-    if (!items.length) {
-        scheduleList.innerHTML = '<div class="no-class">📚 오늘은 수업이 없습니다</div>';
+    if (!SCHEDULE.length) {
+        scheduleList.innerHTML = '<div class="no-class">📚 오늘은 일정이 없습니다</div>';
         return;
     }
 
-    scheduleList.innerHTML = items.map(s => {
-        const startM = timeToMins(s.start), endM = timeToMins(s.end);
+    scheduleList.innerHTML = SCHEDULE.map(s => {
+        const startM = timeToMins(s.start || '00:00'), endM = timeToMins(s.end || '23:59');
         const cls = nowM >= startM && nowM < endM ? 'current' : nowM >= endM ? 'done' : '';
         return `<div class="schedule-item ${cls}">
             <div class="sch-time">${s.start} – ${s.end}</div>
-            <div class="sch-subject">${s.subject}</div>
-            <div class="sch-loc">📍 ${s.loc}</div>
+            <div class="sch-subject">${s.title}</div>
         </div>`;
     }).join('');
 }
 
 // ── ASSIGNMENT RENDER ────────────────────────────────────────
 function renderAssignments() {
+    if (!ASSIGNMENTS.length) {
+        assignmentList.innerHTML = '<div class="empty-msg">진행 중인 과제가 없습니다</div>';
+        taskCountEl.textContent = '0 pending';
+        return;
+    }
+
     const sorted = [...ASSIGNMENTS].sort((a,b) => calcDday(a.dueDate) - calcDday(b.dueDate));
     assignmentList.innerHTML = sorted.map(a => {
         const d   = calcDday(a.dueDate);
@@ -105,7 +99,7 @@ function renderAssignments() {
         const label = d === 0 ? 'D-DAY' : d < 0 ? '완료' : `D-${d}`;
         return `<div class="assign-item ${cls}">
             <div class="assign-info">
-                <div class="assign-subject">${a.subject}</div>
+                <div class="assign-subject">NOTION</div>
                 <div class="assign-title">${a.title}</div>
                 <div class="assign-due">마감: ${a.dueDate}</div>
             </div>
@@ -117,39 +111,23 @@ function renderAssignments() {
     taskCountEl.textContent = `${pending} pending`;
 }
 
-// ── TODO ─────────────────────────────────────────────────────
-function loadTodos()    { return JSON.parse(localStorage.getItem('jarvis_todos') || '[]'); }
-function saveTodos(arr) { localStorage.setItem('jarvis_todos', JSON.stringify(arr)); }
-
+// ── TODO (Reminders) ─────────────────────────────────────────
 function renderTodos() {
-    const todos = loadTodos();
-    if (!todos.length) { todoList.innerHTML = '<div class="empty-msg">할 일이 없습니다</div>'; return; }
-    todoList.innerHTML = todos.map(t => `
-        <div class="todo-item" data-id="${t.id}">
-            <input type="checkbox" class="todo-check" ${t.done?'checked':''} onchange="toggleTodo(${t.id})">
-            <span class="todo-text ${t.done?'done':''}">${t.text}</span>
-            <button class="todo-del" onclick="deleteTodo(${t.id})">✕</button>
+    if (!REMINDERS.length) { 
+        todoList.innerHTML = '<div class="empty-msg">미리알림이 없습니다</div>'; 
+        return; 
+    }
+    todoList.innerHTML = REMINDERS.map(t => `
+        <div class="todo-item" style="padding-left:10px;">
+            <span style="color:#00e5ff;">■</span>
+            <span class="todo-text">${t.name}</span>
+            ${t.due && t.due !== 'none' ? `<span style="font-size:0.7em; color:#888;">(${t.due})</span>` : ''}
         </div>`).join('');
 }
 
-function addTodo(text) {
-    if (!text.trim()) return;
-    const todos = loadTodos();
-    todos.push({ id: Date.now(), text: text.trim(), done: false });
-    saveTodos(todos); renderTodos();
-}
-
-function toggleTodo(id) {
-    const todos = loadTodos().map(t => t.id===id ? {...t, done:!t.done} : t);
-    saveTodos(todos); renderTodos();
-}
-
-function deleteTodo(id) {
-    saveTodos(loadTodos().filter(t => t.id!==id)); renderTodos();
-}
-
-todoAddBtn.addEventListener('click', () => { addTodo(todoInput.value); todoInput.value=''; });
-todoInput.addEventListener('keydown', e => { if(e.key==='Enter'){ addTodo(todoInput.value); todoInput.value=''; } });
+todoAddBtn.style.display = 'none';
+todoInput.placeholder = '미리알림 연동 완료 (읽기 전용)';
+todoInput.disabled = true;
 
 // ── WEATHER ──────────────────────────────────────────────────
 async function fetchWeather() {
@@ -222,56 +200,32 @@ async function doBriefing() {
     }, 800);
 }
 
-// ── COMMAND HANDLER ───────────────────────────────────────────
-function handleCommand(raw) {
-    const cmd = raw.toLowerCase().replace(/[.,!?]/g,'').trim();
-    recogStatusEl.textContent = 'PROCESSING';
+// ── COMMAND HANDLER (LLM Brain) ───────────────────────────────
+async function handleCommand(raw) {
+    const text = raw.trim();
+    if (!text) return;
+    
+    recogStatusEl.textContent = 'THINKING...';
+    
+    // Construct context for the LLM
+    const context = `
+    현재 시간: ${new Date().toLocaleString('ko-KR')}
+    오늘 일정(Calendar): ${SCHEDULE.map(s => s.start + ' ' + s.title).join(', ') || '일정 없음'}
+    할 일(Reminders): ${REMINDERS.map(r => r.name).join(', ') || '할 일 없음'}
+    과제(Notion): ${ASSIGNMENTS.map(a => a.title + ' (마감: ' + a.dueDate + ')').join(', ') || '과제 없음'}
+    날씨: ${weatherCache ? weatherCache.desc + ', ' + weatherCache.temp + '도' : '정보 없음'}
+    `;
 
-    setTimeout(()=>{
-        recogStatusEl.textContent = 'LISTENING';
-
-        if (match(cmd,['안녕','하이','반가','자비스'])) {
-            doBriefing();
-        }
-        else if (match(cmd,['시간','몇 시','몇시'])) {
-            const n=new Date(), ap=n.getHours()<12?'오전':'오후', h12=n.getHours()%12||12;
-            jarvisSpeak(`현재 시각은 ${ap} ${h12}시 ${n.getMinutes()}분입니다.`);
-        }
-        else if (match(cmd,['날짜','오늘','며칠','몇월'])) {
-            const n=new Date();
-            jarvisSpeak(`오늘은 ${n.getFullYear()}년 ${n.getMonth()+1}월 ${n.getDate()}일 ${DAYS_KO[n.getDay()]}요일입니다.`);
-        }
-        else if (match(cmd,['날씨','기온','비','맑'])) {
-            fetchWeather().then(w=>{ jarvisSpeak(w?`현재 서울 날씨: ${w.desc}, ${w.temp}°C`:'날씨 정보를 가져올 수 없습니다.'); });
-        }
-        else if (match(cmd,['일정','수업','강의'])) {
-            const items=SCHEDULE.filter(s=>s.days.includes(new Date().getDay()));
-            if(items.length) items.forEach(s=>jarvisSpeak(`${s.start}~${s.end} ${s.subject} (${s.loc})`));
-            else jarvisSpeak('오늘은 수업이 없습니다.');
-        }
-        else if (match(cmd,['과제','마감','제출','d-day','디데이'])) {
-            const sorted=[...ASSIGNMENTS].sort((a,b)=>calcDday(a.dueDate)-calcDday(b.dueDate));
-            sorted.forEach(a=>jarvisSpeak(`D-${calcDday(a.dueDate)} | ${a.subject}: ${a.title} (${a.dueDate})`));
-        }
-        else if (match(cmd,['할 일 추가','todo','추가해'])) {
-            const text = raw.replace(/할 일 추가|todo|추가해/gi,'').trim();
-            if(text){ addTodo(text); jarvisSpeak(`할 일 "${text}"을(를) 등록했습니다.`); }
-            else    { jarvisSpeak('추가할 내용을 함께 말씀해주세요. 예: "할 일 추가 발표 자료 준비"'); }
-        }
-        else if (match(cmd,['힘내','응원','격려','힘들'])) {
-            jarvisSpeak(pick(['토니 스타크도 동굴에서 시작했습니다. 포기하지 마세요.','잘 하고 있습니다. 조금만 더 파이팅!','어려운 상황도 반드시 끝납니다. 응원합니다.']));
-        }
-        else if (match(cmd,['도움말','뭐 할','기능','명령'])) {
-            jarvisSpeak('사용 가능: 안녕 자비스(브리핑) / 시간 / 날짜 / 날씨 / 오늘 일정 / 과제 마감 / 할 일 추가 [내용] / 힘내');
-        }
-        else if (match(cmd,['종료','꺼줘','바이','잘가'])) {
-            jarvisSpeak('시스템을 절전 모드로 전환합니다. 수고하셨습니다.');
-            setTimeout(()=>stopVoiceLink(), 2000);
-        }
-        else {
-            jarvisSpeak(pick([`"${raw}" 명령을 인식하지 못했습니다. "도움말"을 말씀해주세요.`,'다시 한 번 말씀해주시겠어요?']));
-        }
-    }, 350);
+    const result = await window.jarvis.askLlm({ text, context });
+    
+    recogStatusEl.textContent = 'LISTENING';
+    
+    if (result.reply) {
+        jarvisSpeak(result.reply);
+    } else {
+        jarvisSpeak("네트워크 오류로 두뇌 서버에 연결할 수 없습니다.");
+        log(result.error, 'error');
+    }
 }
 
 // ── CANVAS VISUALIZER ────────────────────────────────────────
@@ -338,49 +292,127 @@ async function startAudio() {
 
 function stopAudio() { if(audioCtx){audioCtx.close();audioCtx=analyser=micSource=null;} audioStatusEl.textContent='STANDBY'; }
 
-// ── VOICE RECOGNITION ────────────────────────────────────────
-function initRecognition() {
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR){ log('SpeechRecognition not supported. Use Chrome.','error'); return null; }
-    const rec=new SR(); rec.lang='ko-KR'; rec.continuous=true; rec.interimResults=true;
-
-    rec.onstart=()=>{ recogStatusEl.textContent='LISTENING'; };
-    rec.onresult=(e)=>{
-        let interim='', final='';
-        for(let i=e.resultIndex;i<e.results.length;i++){
-            const t=e.results[i][0].transcript;
-            e.results[i].isFinal ? final+=t : interim+=t;
-        }
-        transcriptBox.innerHTML = interim ? `<span class="interim">${interim}</span>` : '<span class="transcript-placeholder">"안녕 자비스" 라고 말해보세요</span>';
-        if(final){ const cmd=final.trim(); transcriptBox.innerHTML=`"${cmd}"`; log(cmd,'user'); handleCommand(cmd); }
-    };
-    rec.onerror=(e)=>{ if(e.error!=='no-speech') log(`Recognition error: ${e.error}`,'error'); };
-    rec.onend=()=>{ recogStatusEl.textContent='IDLE'; if(isListening) setTimeout(()=>{try{rec.start();}catch(e){}},300); };
-    return rec;
-}
-
-// ── VOICE LINK ────────────────────────────────────────────────
+// ── VOICE LINK (Groq Whisper Integration) ─────────────────────
 async function startVoiceLink() {
-    isListening=true;
-    voiceBtn.classList.add('listening'); voiceBtnLabel.textContent='TERMINATE VOICE LINK';
-    micDot.classList.add('active'); micStatusText.textContent='VOICE LINK ONLINE';
+    if (isListening) return;
+    isListening = true;
+    voiceBtn.classList.add('listening'); voiceBtnLabel.textContent = 'TERMINATE VOICE LINK';
+    micDot.classList.add('active'); micStatusText.textContent = 'VOICE LINK ONLINE';
+    
     await startAudio();
-    recognition=initRecognition();
-    if(recognition){ try{recognition.start();}catch(e){} jarvisSpeak('음성 링크가 활성화되었습니다. "안녕 자비스" 라고 말씀해보세요.'); }
+    startMediaRecorder();
+    jarvisSpeak('AI 음성 엔진(Groq Whisper)이 활성화되었습니다. 말씀해 보세요.');
 }
 
 function stopVoiceLink() {
-    isListening=false;
-    voiceBtn.classList.remove('listening'); voiceBtnLabel.textContent='ACTIVATE VOICE LINK';
-    micDot.classList.remove('active'); micStatusText.textContent='VOICE LINK OFFLINE';
-    if(recognition){try{recognition.stop();}catch(e){} recognition=null;}
-    stopAudio(); recogStatusEl.textContent='IDLE';
-    transcriptBox.innerHTML='<span class="transcript-placeholder">"안녕 자비스" 라고 말해보세요</span>';
-    arcCore.style.transform='scale(1)'; arcCore.style.boxShadow='';
-    log('Voice link terminated.','sys');
+    isListening = false;
+    voiceBtn.classList.remove('listening'); voiceBtnLabel.textContent = 'ACTIVATE VOICE LINK';
+    micDot.classList.remove('active'); micStatusText.textContent = 'VOICE LINK OFFLINE';
+    
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    stopAudio(); 
+    recogStatusEl.textContent = 'IDLE';
+    transcriptBox.innerHTML = '<span class="transcript-placeholder">"안녕 자비스" 라고 말해보세요</span>';
+    arcCore.style.transform = 'scale(1)'; arcCore.style.boxShadow = '';
+    log('Voice link terminated.', 'sys');
 }
 
-voiceBtn.addEventListener('click', ()=> isListening ? stopVoiceLink() : startVoiceLink());
+function startMediaRecorder() {
+    if (!micSource) return;
+    const stream = micSource.mediaStream;
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    audioChunks = [];
+    hasSpoken = false;
+
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+
+    mediaRecorder.onstop = async () => {
+        if (!isListening) return;
+        
+        // Only transcribe if some voice was actually detected
+        if (audioChunks.length > 0 && hasSpoken) {
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            const buffer = await blob.arrayBuffer();
+            
+            recogStatusEl.textContent = 'TRANSCRIBING...';
+            const result = await window.jarvis.transcribeAudio(buffer);
+            
+            if (result && result.text) {
+                const cmd = result.text.trim();
+                if (cmd.length > 1) {
+                    transcriptBox.innerHTML = `"${cmd}"`;
+                    log(cmd, 'user');
+                    handleCommand(cmd);
+                }
+            } else if (result && result.error) {
+                log(`Transcription Error: ${result.error}`, 'error');
+            }
+        }
+        
+        // Reset and restart for continuous listening if still active
+        if (isListening) {
+            audioChunks = [];
+            hasSpoken = false;
+            lastAudioTime = Date.now();
+            try {
+                mediaRecorder.start(500); // Collect data every 500ms
+                recogStatusEl.textContent = 'LISTENING';
+            } catch(e) {}
+        }
+    };
+
+    mediaRecorder.start(500); // Request data every 0.5s
+    recogStatusEl.textContent = 'LISTENING';
+    lastAudioTime = Date.now();
+    monitorSilence();
+}
+
+function monitorSilence() {
+    if (!analyser || !isListening) return;
+
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+    
+    const check = () => {
+        if (!isListening) return;
+        analyser.getByteTimeDomainData(dataArray);
+        
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+            const v = (dataArray[i] - 128) / 128;
+            sum += v * v;
+        }
+        const rms = Math.sqrt(sum / bufferLength);
+        const now = Date.now();
+
+        // Detect if user is speaking (Sensitivity threshold: 0.06)
+        if (rms > 0.06) { 
+            lastAudioTime = now;
+            if (!hasSpoken) {
+                hasSpoken = true;
+                recogStatusEl.textContent = 'VOICE DETECTED';
+            }
+        } else { 
+            // If user has spoken and then stayed silent for 1.2s
+            if (hasSpoken && now - lastAudioTime > 1200) {
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }
+            // If never spoken but listening for too long (prevent huge buffer), reset every 10s
+            else if (!hasSpoken && now - lastAudioTime > 10000) {
+                if (mediaRecorder.state === 'recording') {
+                    audioChunks = [];
+                    lastAudioTime = now;
+                }
+            }
+        }
+        requestAnimationFrame(check);
+    };
+    check();
+}
+
+voiceBtn.addEventListener('click', () => isListening ? stopVoiceLink() : startVoiceLink());
 
 // ── LIVE INTEGRATIONS (Electron IPC) ─────────────────────────
 const isElectron = !!window.jarvis;
@@ -389,41 +421,22 @@ const isElectron = !!window.jarvis;
 async function loadCalendarEvents() {
     if (!isElectron) return;
     const result = await window.jarvis.getCalendarEvents();
-    if (!result || result.error) {
-        if (result?.error) log(result.error, 'error');
-        return;
+    if (result && Array.isArray(result)) {
+        SCHEDULE = result;
+        renderSchedule();
+        log(`캘린더에서 오늘 일정 ${result.length}개를 불러왔습니다.`, 'sys');
     }
-    if (!result.length) return;
-    // Inject calendar events into schedule panel
-    const calSection = document.createElement('div');
-    calSection.innerHTML = `<div class="panel-header" style="margin-top:14px">CALENDAR — 오늘 <span style="font-size:.5rem;color:#00ff88">● LIVE</span></div>`;
-    const list = document.createElement('div');
-    list.className = 'schedule-list';
-    result.forEach(ev => {
-        const item = document.createElement('div');
-        item.className = 'schedule-item';
-        item.innerHTML = `<div class="sch-time">${ev.start || ''}</div><div class="sch-subject">${ev.title}</div>`;
-        list.appendChild(item);
-    });
-    calSection.appendChild(list);
-    document.querySelector('.left-panel').appendChild(calSection);
-    log(`캘린더에서 오늘 일정 ${result.length}개를 불러왔습니다.`, 'sys');
 }
 
 // macOS Reminders
 async function loadReminders() {
-    if (!isElectron) { document.getElementById('reminderList').innerHTML = '<div class="empty-msg">Electron 앱에서 실행 시 표시됩니다</div>'; return; }
+    if (!isElectron) return;
     const result = await window.jarvis.getReminders();
-    const el = document.getElementById('reminderList');
-    if (!el) return;
-    if (!result || result.error) { el.innerHTML = `<div class="empty-msg">${result?.error || '미리알림 없음'}</div>`; return; }
-    if (!result.length) { el.innerHTML = '<div class="empty-msg">미완료 미리알림이 없습니다</div>'; return; }
-    el.innerHTML = result.map(r => `
-        <div class="schedule-item">
-            <div class="sch-subject">🔔 ${r.name}</div>
-            ${r.due ? `<div class="sch-loc">마감: ${r.due}</div>` : ''}
-        </div>`).join('');
-    log(`미리알림 ${result.length}개를 불러왔습니다.`, 'sys');
+    if (result && Array.isArray(result)) {
+        REMINDERS = result;
+        renderTodos();
+        log(`미리알림 ${result.length}개를 불러왔습니다.`, 'sys');
+    }
 }
 
 // Notion
@@ -434,27 +447,14 @@ async function loadNotionTasks() {
         log('노션 미연동. ⚙ 설정에서 토큰과 DB ID를 입력하세요.', 'sys'); return;
     }
     if (result.error) { log(`노션 오류: ${result.error}`, 'error'); return; }
-    if (!result.length) { log('노션에서 진행 중인 과제가 없습니다.', 'sys'); return; }
-
-    // Merge Notion tasks into assignment panel
-    const panel = document.getElementById('assignmentList');
-    result.forEach(task => {
-        const d   = task.due ? calcDday(task.due) : null;
-        const cls = d !== null ? ddayClass(d) : 'normal';
-        const badge = d !== null ? (d===0?'D-DAY':d<0?'완료':`D-${d}`) : '―';
-        const el = document.createElement('div');
-        el.className = `assign-item ${cls}`;
-        el.innerHTML = `
-            <div class="assign-info">
-                <div class="assign-subject">NOTION</div>
-                <div class="assign-title">${task.title}</div>
-                ${task.due ? `<div class="assign-due">마감: ${task.due}</div>` : ''}
-            </div>
-            <div class="dday-badge ${cls}">${badge}</div>`;
-        panel.appendChild(el);
-    });
-    log(`노션에서 과제 ${result.length}개를 불러왔습니다.`, 'sys');
+    
+    if (Array.isArray(result)) {
+        ASSIGNMENTS = result.map(t => ({ title: t.title, dueDate: t.due ? t.due.split('T')[0] : '2099-12-31' }));
+        renderAssignments();
+        log(`노션에서 과제 ${result.length}개를 불러왔습니다.`, 'sys');
+    }
 }
+
 
 // ── SETTINGS MODAL ────────────────────────────────────────────
 const settingsBtn  = document.getElementById('settingsBtn');
@@ -463,6 +463,7 @@ const modalClose   = document.getElementById('modalClose');
 const modalSave    = document.getElementById('modalSave');
 const notionTokenEl= document.getElementById('notionToken');
 const notionDbIdEl = document.getElementById('notionDbId');
+const groqApiKeyEl  = document.getElementById('groqApiKey');
 
 async function openSettings() {
     settingsModal.classList.add('open');
@@ -470,6 +471,7 @@ async function openSettings() {
         const cfg = await window.jarvis.getConfig();
         notionTokenEl.value = cfg.notionToken || '';
         notionDbIdEl.value  = cfg.notionDbId  || '';
+        groqApiKeyEl.value  = cfg.groqApiKey  || '';
     }
 }
 
@@ -479,10 +481,16 @@ settingsModal?.addEventListener('click', e => { if(e.target===settingsModal) set
 
 modalSave?.addEventListener('click', async () => {
     if (isElectron) {
-        await window.jarvis.saveConfig({ notionToken: notionTokenEl.value.trim(), notionDbId: notionDbIdEl.value.trim() });
-        jarvisSpeak('설정이 저장되었습니다. 노션 연동을 다시 시도합니다.');
+        await window.jarvis.saveConfig({ 
+            notionToken: notionTokenEl.value.trim(), 
+            notionDbId: notionDbIdEl.value.trim(),
+            groqApiKey: groqApiKeyEl.value.trim() 
+        });
+        jarvisSpeak('설정이 저장되었습니다.');
         settingsModal.classList.remove('open');
-        setTimeout(loadNotionTasks, 500);
+        setTimeout(() => {
+            loadNotionTasks();
+        }, 500);
     } else {
         jarvisSpeak('설정 저장은 Electron 앱에서만 가능합니다.');
         settingsModal.classList.remove('open');
