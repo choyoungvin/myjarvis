@@ -1,7 +1,7 @@
 {
   "name": "jarvis",
   "version": "3.0.0",
-  "description": "J.A.R.V.I.S Academic Secretary — AI-powered student assistant",
+  "description": "JARVIS Academic Secretary — AI-powered student assistant",
   "main": "main.js",
   "author": "202644009 조영빈",
   "license": "MIT",

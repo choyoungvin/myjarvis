@@ -502,7 +502,7 @@ modalSave?.addEventListener('click', async () => {
     renderSchedule(); renderAssignments(); renderTodos();
     fetchWeather();
     const msgs=[
-        {t:300,  text:'Booting J.A.R.V.I.S Academic Secretary...', type:'sys'},
+        {t:300,  text:'Booting JARVIS Academic Secretary...', type:'sys'},
         {t:800,  text:'Holographic projection: ONLINE', type:'sys'},
         {t:1300, text:'Speech recognition engine: READY', type:'sys'},
         {t:1800, text:'모든 시스템 정상 가동. 환영합니다, 조영빈 씨.', type:'jarvis'},
