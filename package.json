@@ -1,6 +1,6 @@
 {
-  "name": "jarvis-ai",
-  "version": "2.0.0",
+  "name": "jarvis",
+  "version": "3.0.0",
   "description": "J.A.R.V.I.S Academic Secretary — AI-powered student assistant",
   "main": "main.js",
   "author": "202644009 조영빈",
@@ -19,7 +19,7 @@
   },
   "build": {
     "appId": "com.joker.jarvis-ai",
-    "productName": "J.A.R.V.I.S",
+    "productName": "JARVIS",
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "app/assets/icon.icns",

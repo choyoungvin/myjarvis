@@ -24,7 +24,9 @@ function saveConfig(data) {
 function createWindow() {
     const win = new BrowserWindow({
         width: 1280,
-        height: 780,
+        height: 800,
+        title: "JARVIS",
+        icon: path.join(__dirname, 'app/assets/icon.png'),
         minWidth: 1100,
         minHeight: 700,
         frame: false,
