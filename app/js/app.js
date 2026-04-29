@@ -18,6 +18,8 @@ const ctx               = canvas.getContext('2d');
 const scheduleList      = document.getElementById('scheduleList');
 const todoList          = document.getElementById('todoList');
 const assignmentList    = document.getElementById('assignmentList');
+const assignmentInput   = document.getElementById('assignmentInput');
+const assignmentAddBtn  = document.getElementById('assignmentAddBtn');
 const todoInput         = document.getElementById('todoInput');
 const todoAddBtn        = document.getElementById('todoAddBtn');
 const audioStatusEl     = document.getElementById('audioStatus');
@@ -93,23 +95,73 @@ function renderAssignments() {
     }
 
     const sorted = [...ASSIGNMENTS].sort((a,b) => calcDday(a.dueDate) - calcDday(b.dueDate));
-    assignmentList.innerHTML = sorted.map(a => {
+    assignmentList.innerHTML = sorted.map((a, i) => {
         const d   = calcDday(a.dueDate);
         const cls = ddayClass(d);
         const label = d === 0 ? 'D-DAY' : d < 0 ? '완료' : `D-${d}`;
         return `<div class="assign-item ${cls}">
             <div class="assign-info">
-                <div class="assign-subject">NOTION</div>
+                <div class="assign-subject">과제</div>
                 <div class="assign-title">${a.title}</div>
                 <div class="assign-due">마감: ${a.dueDate}</div>
             </div>
-            <div class="dday-badge ${cls}">${label}</div>
+            <div class="dday-badge ${cls}" style="cursor:pointer;" onclick="removeAssignment(${i})" title="클릭하여 삭제">${label} (X)</div>
         </div>`;
     }).join('');
 
     const pending = sorted.filter(a => calcDday(a.dueDate) >= 0).length;
     taskCountEl.textContent = `${pending} pending`;
 }
+
+function saveAssignments() {
+    localStorage.setItem('jarvisAssignments', JSON.stringify(ASSIGNMENTS));
+}
+
+function loadLocalAssignments() {
+    const data = localStorage.getItem('jarvisAssignments');
+    if (data) ASSIGNMENTS = JSON.parse(data);
+    renderAssignments();
+}
+
+function addAssignment(text) {
+    // try to extract date YYYY-MM-DD
+    const match = text.match(/\d{4}-\d{2}-\d{2}/);
+    let dueDate = '2099-12-31';
+    let title = text;
+    if (match) {
+        dueDate = match[0];
+        title = text.replace(match[0], '').trim();
+    } else {
+        // default to 7 days later if no date
+        const nextWk = new Date();
+        nextWk.setDate(nextWk.getDate() + 7);
+        dueDate = nextWk.toISOString().split('T')[0];
+    }
+    ASSIGNMENTS.push({ title, dueDate });
+    saveAssignments();
+    renderAssignments();
+    log(`과제 추가됨: ${title} (마감: ${dueDate})`, 'sys');
+    jarvisSpeak(`${title} 과제가 추가되었습니다.`);
+}
+
+function removeAssignment(index) {
+    ASSIGNMENTS.splice(index, 1);
+    saveAssignments();
+    renderAssignments();
+}
+
+assignmentAddBtn.addEventListener('click', () => {
+    if(assignmentInput.value.trim()) {
+        addAssignment(assignmentInput.value.trim());
+        assignmentInput.value = '';
+    }
+});
+assignmentInput.addEventListener('keypress', e => {
+    if(e.key === 'Enter' && assignmentInput.value.trim()) {
+        addAssignment(assignmentInput.value.trim());
+        assignmentInput.value = '';
+    }
+});
 
 // ── TODO (Reminders) ─────────────────────────────────────────
 function renderTodos() {
@@ -205,6 +257,17 @@ async function handleCommand(raw) {
     const text = raw.trim();
     if (!text) return;
     
+    // Local intercepts
+    if (text.startsWith('과제 추가')) {
+        const title = text.replace('과제 추가', '').trim();
+        if(title) addAssignment(title);
+        return;
+    }
+    if (text.includes('브리핑') || text.includes('안녕 자비스')) {
+        doBriefing();
+        return;
+    }
+
     recogStatusEl.textContent = 'THINKING...';
     
     // Construct context for the LLM
@@ -295,11 +358,28 @@ function stopAudio() { if(audioCtx){audioCtx.close();audioCtx=analyser=micSource
 // ── VOICE LINK (Groq Whisper Integration) ─────────────────────
 async function startVoiceLink() {
     if (isListening) return;
+
+    // Check Groq API key before starting
+    if (isElectron) {
+        const cfg = await window.jarvis.getConfig();
+        if (!cfg.groqApiKey) {
+            jarvisSpeak('Groq API 키가 설정되지 않았습니다. ⚙ 설정에서 API 키를 입력해 주세요.');
+            log('GROQ API KEY MISSING — ⚙ 설정에서 입력하세요', 'error');
+            return;
+        }
+    }
+
     isListening = true;
     voiceBtn.classList.add('listening'); voiceBtnLabel.textContent = 'TERMINATE VOICE LINK';
     micDot.classList.add('active'); micStatusText.textContent = 'VOICE LINK ONLINE';
     
     await startAudio();
+    if (!micSource) {
+        isListening = false;
+        voiceBtn.classList.remove('listening'); voiceBtnLabel.textContent = 'ACTIVATE VOICE LINK';
+        micDot.classList.remove('active'); micStatusText.textContent = 'VOICE LINK OFFLINE';
+        return;
+    }
     startMediaRecorder();
     jarvisSpeak('AI 음성 엔진(Groq Whisper)이 활성화되었습니다. 말씀해 보세요.');
 }
@@ -320,7 +400,18 @@ function stopVoiceLink() {
 function startMediaRecorder() {
     if (!micSource) return;
     const stream = micSource.mediaStream;
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+    // Pick best supported MIME type
+    const mimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+    let mimeType = '';
+    for (const m of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(m)) { mimeType = m; break; }
+    }
+    log(`Recording format: ${mimeType || 'default'}`, 'sys');
+
+    mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
     audioChunks = [];
     hasSpoken = false;
 
@@ -344,8 +435,12 @@ function startMediaRecorder() {
                     log(cmd, 'user');
                     handleCommand(cmd);
                 }
+            } else if (result && result.error === 'GROQ_API_KEY_MISSING') {
+                log('✖ Groq API 키 미설정. ⚙ 설정에서 입력하세요.', 'error');
+                jarvisSpeak('API 키가 없어서 음성 인식이 불가능합니다.');
+                stopVoiceLink();
             } else if (result && result.error) {
-                log(`Transcription Error: ${result.error}`, 'error');
+                log(`✖ Transcription: ${result.error}`, 'error');
             }
         }
         
@@ -439,38 +534,19 @@ async function loadReminders() {
     }
 }
 
-// Notion
-async function loadNotionTasks() {
-    if (!isElectron) return;
-    const result = await window.jarvis.getNotionTasks();
-    if (!result || result.error === 'NOTION_NOT_CONFIGURED') {
-        log('노션 미연동. ⚙ 설정에서 토큰과 DB ID를 입력하세요.', 'sys'); return;
-    }
-    if (result.error) { log(`노션 오류: ${result.error}`, 'error'); return; }
-    
-    if (Array.isArray(result)) {
-        ASSIGNMENTS = result.map(t => ({ title: t.title, dueDate: t.due ? t.due.split('T')[0] : '2099-12-31' }));
-        renderAssignments();
-        log(`노션에서 과제 ${result.length}개를 불러왔습니다.`, 'sys');
-    }
-}
+// Local assignments already loaded on boot
 
 
-// ── SETTINGS MODAL ────────────────────────────────────────────
 const settingsBtn  = document.getElementById('settingsBtn');
 const settingsModal= document.getElementById('settingsModal');
 const modalClose   = document.getElementById('modalClose');
 const modalSave    = document.getElementById('modalSave');
-const notionTokenEl= document.getElementById('notionToken');
-const notionDbIdEl = document.getElementById('notionDbId');
 const groqApiKeyEl  = document.getElementById('groqApiKey');
 
 async function openSettings() {
     settingsModal.classList.add('open');
     if (isElectron) {
         const cfg = await window.jarvis.getConfig();
-        notionTokenEl.value = cfg.notionToken || '';
-        notionDbIdEl.value  = cfg.notionDbId  || '';
         groqApiKeyEl.value  = cfg.groqApiKey  || '';
     }
 }
@@ -482,15 +558,10 @@ settingsModal?.addEventListener('click', e => { if(e.target===settingsModal) set
 modalSave?.addEventListener('click', async () => {
     if (isElectron) {
         await window.jarvis.saveConfig({ 
-            notionToken: notionTokenEl.value.trim(), 
-            notionDbId: notionDbIdEl.value.trim(),
             groqApiKey: groqApiKeyEl.value.trim() 
         });
         jarvisSpeak('설정이 저장되었습니다.');
         settingsModal.classList.remove('open');
-        setTimeout(() => {
-            loadNotionTasks();
-        }, 500);
     } else {
         jarvisSpeak('설정 저장은 Electron 앱에서만 가능합니다.');
         settingsModal.classList.remove('open');
@@ -499,7 +570,8 @@ modalSave?.addEventListener('click', async () => {
 
 // ── BOOT ─────────────────────────────────────────────────────
 (function boot(){
-    renderSchedule(); renderAssignments(); renderTodos();
+    loadLocalAssignments();
+    renderSchedule(); renderTodos();
     fetchWeather();
     const msgs=[
         {t:300,  text:'Booting JARVIS Academic Secretary...', type:'sys'},
@@ -516,7 +588,6 @@ modalSave?.addEventListener('click', async () => {
             log('macOS 통합 데이터를 불러오는 중...', 'sys');
             loadCalendarEvents();
             loadReminders();
-            loadNotionTasks();
         }, 2000);
     } else {
         setTimeout(()=>{ loadReminders(); }, 1000);

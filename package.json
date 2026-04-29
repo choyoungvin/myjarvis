@@ -22,7 +22,17 @@
     "productName": "JARVIS",
     "mac": {
       "category": "public.app-category.productivity",
-      "icon": "app/assets/icon.icns"
+      "icon": "app/assets/icon.icns",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCalendarsUsageDescription": "자비스가 오늘의 수업 일정을 브리핑하기 위해 캘린더 접근 권한이 필요합니다.",
+        "NSCalendarsFullAccessUsageDescription": "자비스가 오늘의 수업 일정을 브리핑하기 위해 캘린더 접근 권한이 필요합니다.",
+        "NSRemindersUsageDescription": "자비스가 할 일 목록을 확인하기 위해 미리알림 접근 권한이 필요합니다.",
+        "NSRemindersFullAccessUsageDescription": "자비스가 할 일 목록을 확인하기 위해 미리알림 접근 권한이 필요합니다.",
+        "NSMicrophoneUsageDescription": "자비스와 음성으로 대화하기 위해 마이크 권한이 필요합니다."
+      }
     },
     "directories": {
       "output": "dist"
@@ -30,6 +40,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "mac-data.js",
       "app/**/*",
       "!node_modules"
     ]

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -50,6 +50,19 @@ function createWindow() {
 
     win.loadFile('app/index.html');
 
+    // Allow microphone & camera permissions inside Electron window
+    win.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+        if (['media', 'microphone', 'camera', 'audioCapture'].includes(permission)) {
+            callback(true);
+        } else {
+            callback(false);
+        }
+    });
+    win.webContents.session.setPermissionCheckHandler((webContents, permission) => {
+        if (['media', 'microphone', 'audioCapture'].includes(permission)) return true;
+        return false;
+    });
+
     // Window controls via IPC
     ipcMain.on('window-minimize', () => win.minimize());
     ipcMain.on('window-close',    () => win.close());
@@ -69,30 +82,101 @@ function runAppleScript(script) {
     });
 }
 
-// ── IPC: macOS Integration (via Swift EventKit) ────────────────
-ipcMain.handle('get-calendar-events', async () => {
-    return new Promise((resolve) => {
-        exec(`swift "${path.join(__dirname, 'mac-data.swift')}" calendar`, (err, stdout) => {
-            if (err || !stdout.trim()) resolve([]);
-            else {
-                try { resolve(JSON.parse(stdout.trim())); }
-                catch { resolve([]); }
-            }
-        });
-    });
+// ── JXA Scripts (inlined to avoid ASAR path issues) ─────────
+const JXA_CALENDAR = `
+ObjC.import('EventKit');
+var store = $.EKEventStore.alloc.init;
+var done = false;
+var result = [];
+store.requestAccessToEntityTypeCompletion(0, function(granted, error) {
+    if (granted) {
+        var calendars = store.calendarsForEntityType(0);
+        var cal = $.NSCalendar.currentCalendar;
+        var startOfDay = cal.startOfDayForDate($.NSDate.date);
+        var comps = $.NSDateComponents.alloc.init;
+        comps.day = 1;
+        var endOfDay = cal.dateByAddingComponentsToDateOptions(comps, startOfDay, 0);
+        var predicate = store.predicateForEventsWithStartDateEndDateCalendars(startOfDay, endOfDay, calendars);
+        var events = store.eventsMatchingPredicate(predicate);
+        var f = $.NSDateFormatter.alloc.init;
+        f.dateFormat = 'HH:mm';
+        for (var i = 0; i < events.count; i++) {
+            var e = events.objectAtIndex(i);
+            result.push({ title: e.title.js || '', start: f.stringFromDate(e.startDate).js || '', end: f.stringFromDate(e.endDate).js || '' });
+        }
+    }
+    done = true;
 });
+while(!done) { $.NSRunLoop.currentRunLoop.runModeBeforeDate($.NSDefaultRunLoopMode, $.NSDate.dateWithTimeIntervalSinceNow(0.1)); }
+JSON.stringify(result);
+`;
 
-ipcMain.handle('get-reminders', async () => {
+const SWIFT_REMINDERS = `
+import EventKit
+import Foundation
+
+let store = EKEventStore()
+let sema = DispatchSemaphore(value: 0)
+var result = [[String: String]]()
+
+func fetch() {
+    let predicate = store.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+    store.fetchReminders(matching: predicate) { reminders in
+        for r in reminders ?? [] {
+            result.append(["name": r.title ?? "", "due": "none"])
+        }
+        sema.signal()
+    }
+}
+
+if #available(macOS 14.0, *) {
+    store.requestFullAccessToReminders { (granted, error) in
+        if granted { fetch() } else { sema.signal() }
+    }
+} else {
+    store.requestAccess(to: .reminder) { (granted, error) in
+        if granted { fetch() } else { sema.signal() }
+    }
+}
+sema.wait()
+
+if let data = try? JSONSerialization.data(withJSONObject: result),
+   let json = String(data: data, encoding: .utf8) {
+    print(json)
+}
+`;
+
+function runJXA(script) {
     return new Promise((resolve) => {
-        exec(`swift "${path.join(__dirname, 'mac-data.swift')}" reminders`, (err, stdout) => {
-            if (err || !stdout.trim()) resolve([]);
-            else {
-                try { resolve(JSON.parse(stdout.trim())); }
-                catch { resolve([]); }
-            }
+        const tmpFile = path.join('/tmp', `jarvis_jxa_${Date.now()}.js`);
+        try { fs.writeFileSync(tmpFile, script, 'utf8'); } catch(e) { resolve([]); return; }
+        exec(`osascript -l JavaScript "${tmpFile}"`, (err, stdout, stderr) => {
+            try { fs.unlinkSync(tmpFile); } catch(_) {}
+            const raw = (stdout || '').trim();
+            if (!raw) { resolve([]); return; }
+            try { resolve(JSON.parse(raw)); }
+            catch { resolve([]); }
         });
     });
-});
+}
+
+function runSwift(script) {
+    return new Promise((resolve) => {
+        const tmpFile = path.join('/tmp', `jarvis_swift_${Date.now()}.swift`);
+        try { fs.writeFileSync(tmpFile, script, 'utf8'); } catch(e) { resolve([]); return; }
+        exec(`swift "${tmpFile}"`, (err, stdout, stderr) => {
+            try { fs.unlinkSync(tmpFile); } catch(_) {}
+            const raw = (stdout || '').trim();
+            if (!raw) { resolve([]); return; }
+            try { resolve(JSON.parse(raw)); }
+            catch { resolve([]); }
+        });
+    });
+}
+
+// ── IPC: macOS Integration ────────────────────────────────────
+ipcMain.handle('get-calendar-events', () => runJXA(JXA_CALENDAR));
+ipcMain.handle('get-reminders',       () => runSwift(SWIFT_REMINDERS));
 
 // ── IPC: Groq LLM (Brain) ────────────────────────────────────
 ipcMain.handle('ask-llm', async (_, { text, context }) => {
@@ -107,7 +191,7 @@ ipcMain.handle('ask-llm', async (_, { text, context }) => {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                model: 'llama3-70b-8192',
+                model: 'llama-3.3-70b-versatile',
                 messages: [
                     { role: 'system', content: `당신은 J.A.R.V.I.S, 조영빈 님의 학업을 돕는 인공지능 비서입니다. 아이언맨의 자비스처럼 정중하고 유능한 톤으로 짧게 대답하세요. 다음은 현재 사용자의 상태 데이터입니다:\n${context}` },
                     { role: 'user', content: text }
@@ -126,40 +210,7 @@ ipcMain.handle('ask-llm', async (_, { text, context }) => {
     }
 });
 
-// ── IPC: Notion ───────────────────────────────────────────────
-ipcMain.handle('get-notion-tasks', async () => {
-    const config = loadConfig();
-    if (!config.notionToken || !config.notionDbId) {
-        return { error: 'NOTION_NOT_CONFIGURED' };
-    }
-
-    try {
-        const response = await fetch(`https://api.notion.com/v1/databases/${config.notionDbId}/query`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${config.notionToken}`,
-                'Notion-Version': '2022-06-28',
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                filter: { property: 'Status', status: { does_not_equal: '완료' } },
-                sorts: [{ property: 'Due Date', direction: 'ascending' }],
-            }),
-        });
-        const data = await response.json();
-        if (!data.results) return { error: data.message || 'Notion API 오류' };
-
-        return data.results.map(page => {
-            const props = page.properties;
-            const title = props.Name?.title?.[0]?.plain_text || props.제목?.title?.[0]?.plain_text || '제목 없음';
-            const due   = props['Due Date']?.date?.start || props['마감일']?.date?.start || null;
-            const status = props.Status?.status?.name || props['상태']?.select?.name || '진행중';
-            return { title, due, status, url: page.url };
-        });
-    } catch (e) {
-        return { error: `Notion 연결 실패: ${e.message}` };
-    }
-});
+// Notion IPC handler removed. Assignments will be handled locally.
 
 // ── IPC: Groq Whisper (Speech-to-Text) ────────────────────────
 ipcMain.handle('transcribe-audio', async (_, audioBuffer) => {
