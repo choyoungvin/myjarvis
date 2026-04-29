@@ -345,7 +345,14 @@ renderLoop();
 // ── AUDIO ────────────────────────────────────────────────────
 async function startAudio() {
     try {
-        const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+        const stream=await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1
+            }
+        });
         audioCtx=new (window.AudioContext||window.webkitAudioContext)();
         analyser=audioCtx.createAnalyser(); analyser.fftSize=512; analyser.smoothingTimeConstant=0.8;
         micSource=audioCtx.createMediaStreamSource(stream); micSource.connect(analyser);
